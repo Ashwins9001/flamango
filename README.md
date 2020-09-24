@@ -1,2 +1,2 @@
-# XLang
-An open-source XLang interpreter built in Python
+# Flamango
+An open-source Flamango interpreter built in Python
