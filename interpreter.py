@@ -1,12 +1,27 @@
-INTEGER, PLUS, MINUS, MUL, DIV, EOF = ('INTEGER', 'PLUS', 'MINUS', 'MUL', 'DIV', 'EOF')
+# Token types
+#
+# EOF (end-of-file) token is used to indicate that
+# there is no more input left for lexical analysis
+INTEGER, PLUS, MINUS, MUL, DIV, EOF = (
+    'INTEGER', 'PLUS', 'MINUS', 'MUL', 'DIV', 'EOF'
+)
 
 
 class Token(object):
     def __init__(self, datatype, value):
+        # token type: INTEGER, PLUS, MINUS, MUL, DIV, or EOF
         self.datatype = datatype
+        # token value: non-negative integer value, '+', '-', '*', '/', or None
         self.value = value
 
     def __str__(self):
+        """String representation of the class instance.
+
+        Examples:
+            Token(INTEGER, 3)
+            Token(PLUS, '+')
+            Token(MUL, '*')
+        """
         return 'Token({datatype}, {value})'.format(
             datatype=self.datatype,
             value=repr(self.value)
@@ -82,79 +97,112 @@ class Lexer(object):
 
         return Token(EOF, None)
 
+class AST(object):
+    pass
 
-class Interpreter(object):
+#Define structure nodes of type: BinOp
+#AST will contain BinOp nodes and INTEGER nodes that are used for evaluation
+#BinOp nodes adopt existing nodes as left children and new term or factor as right
+#Term & factor refers to production rules defined in grammar
+#Construction of AST thus gives higher precedence to lower nodes!
+class BinOp(AST):
+    def __init__(self, left, op, right):
+        self.left = left
+        self.token = self.op = op
+        self.right = right
+
+class Num(AST):
+    def __init__(self, token):
+        self.token = token
+        self.value = token.value
+
+
+class Parser(object):
     def __init__(self, lexer):
         self.lexer = lexer
-        # set current token to the first token taken from the input
+        #Retrieve tokens from lexer that assigns tokens & ignores whitespace
         self.current_token = self.lexer.get_next_token()
 
     def error(self):
         raise Exception('Invalid syntax')
 
+    #Compare current with passed token to ensure structure of sentence correct
+    #Iterate to following token
     def eat(self, token_type):
-        # compare the current token type with the passed token
-        # type and if they match then "eat" the current token
-        # and assign the next token to the self.current_token,
-        # otherwise raise an exception.
         if self.current_token.datatype == token_type:
             self.current_token = self.lexer.get_next_token()
         else:
             self.error()
 
-    #factors are highest precedence, basic integers
+    #lowest, most essential level of grammar
     def factor(self):
-        """Return an INTEGER token value.
-
-        factor : INTEGER
-        """
         token = self.current_token
-        self.eat(INTEGER)
-        return token.value
+        if token.datatype == INTEGER:
+            self.eat(INTEGER)
+            return Num(token)
 
-    #terms lower precedence, used for multiplying/dividing
     def term(self):
-         """term : factor ((MUL | DIV) factor)*"""
-        result = self.factor()
-
+        node = self.factor()
         while self.current_token.datatype in (MUL, DIV):
             token = self.current_token
             if token.datatype == MUL:
                 self.eat(MUL)
-                result = result * self.factor() #read following token, store result
-            if token.datatype == DIV:
+            elif token.datatype == DIV:
                 self.eat(DIV)
-                result = result / self.factor()
-        return result
-    
-    #expr lowest precedence, used for adding/subtracting
-    #although expr gets called, program cannot do add/sub op
-    #until data from term -> factor gets prepared
-    #thus factor > term > expr in precedence & exec order
+
+            node = BinOp(left = node, op = token, right = self.factor())
+        return node
+
     def expr(self):
-         """Arithmetic expression parser / interpreter.
-
-        calc>  14 + 2 * 3 - 6 / 2
-        17
-
-        expr   : term ((PLUS | MINUS) term)*
-        term   : factor ((MUL | DIV) factor)*
-        factor : INTEGER
-        """
-        result = self.term()
-
+        node = self.term()
         while self.current_token.datatype in (PLUS, MINUS):
             token = self.current_token
             if token.datatype == PLUS:
                 self.eat(PLUS)
-                result = result + self.term()
             elif token.datatype == MINUS:
                 self.eat(MINUS)
-                result = result - self.term()
+            node = BinOp(left = node, op = token, right = self.term())
 
-        return result
+        return node
 
+    def parse(self):
+        return self.expr()
 
+#BinOp and Num are seperate classes, prod sep objects
+#Thus type(node) identifies correct class & derives method name from that !
+class NodeVisitor(object):
+    def visit(self, node):
+        method_name = 'visit_' + type(node).__name__
+        visitor = getattr(self, method_name, self.generic_visit)
+        return visitor(node)
+    def generic_visit(self, node):
+        raise Exception('No visit_{} method'.format(type(node).__name__))
+
+#NodeVisitor objects get passed to interpreter from visit() method
+#Map methods to node's datatype and visit recursively using post-order
+#Traversal to ensure operands evaluated before operator and
+#Precedence for lower nodes is followed 
+class Interpreter(NodeVisitor):
+    def __init__(self, parser):
+        self.parser = parser
+
+    def visit_BinOp(self, node):
+        if node.op.datatype == PLUS:
+            return self.visit(node.left) + self.visit(node.right)
+        elif node.op.datatype == MINUS:
+            return self.visit(node.left) - self.visit(node.right)
+        elif node.op.datatype == MUL:
+            return self.visit(node.left) * self.visit(node.right)
+        elif node.op.datatype == DIV:
+            return self.visit(node.left) / self.visit(node.right)
+
+    def visit_Num(self, node):
+        return node.value
+
+    def interpret(self):
+        tree = self.parser.parse()
+        return self.visit(tree)
+    
 def main():
     while True:
         try:
@@ -164,8 +212,9 @@ def main():
         if not text:
             continue
         lexer = Lexer(text)
-        interpreter = Interpreter(lexer)
-        result = interpreter.expr()
+        parser = Parser(lexer)
+        interpreter = Interpreter(parser)
+        result = interpreter.interpret()
         print(result)
 
 
